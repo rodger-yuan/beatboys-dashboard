@@ -1,0 +1,6 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    { "name": "beatboys-dashboard", "runtimeExecutable": "node", "runtimeArgs": ["scripts/serve.mjs"], "port": 4180 }
+  ]
+}

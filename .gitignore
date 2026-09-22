@@ -1,0 +1,5 @@
+node_modules/
+.DS_Store
+
+# Rebuilt from the Sleeper API by scripts/build-data.mjs (and in CI on every deploy).
+data/

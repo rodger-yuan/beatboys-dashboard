@@ -1,0 +1,180 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Beat Boys Dynasty</title>
+<meta name="description" content="Tank-a-thon draft order and all-time league records for the Beat Boys Dynasty fantasy football league." />
+<meta name="color-scheme" content="dark" />
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🏈</text></svg>" />
+<link rel="preconnect" href="https://api.sleeper.app" />
+<link rel="stylesheet" href="assets/styles.css" />
+</head>
+<body>
+<div class="wrap">
+
+  <header>
+    <div class="eyebrow">Beat Boys Dynasty</div>
+    <h1>League Dashboard</h1>
+    <div class="sub">
+      <span id="season-label">—</span>
+      <span class="dot"></span>
+      <span id="update-label">Loading…</span>
+      <span class="live-pill" id="live-pill" data-state="stale">Live</span>
+    </div>
+  </header>
+
+  <nav class="tabs" role="tablist">
+    <button class="tab" role="tab" id="tab-tank" aria-controls="panel-tank" aria-selected="true">Tank-a-thon</button>
+    <button class="tab" role="tab" id="tab-records" aria-controls="panel-records" aria-selected="false">League Records</button>
+  </nav>
+
+  <!-- ================= TANK-A-THON ================= -->
+  <div class="panel" id="panel-tank" role="tabpanel" aria-labelledby="tab-tank">
+    <section>
+      <div class="sec-head">
+        <h2>Projected Draft Order</h2>
+        <p class="note">
+          Draft order runs from the lowest cumulative <strong>best possible lineup</strong> to the
+          highest — what each roster <em>could</em> have scored every week with perfect hindsight,
+          bench included. No hiding behind a bad start/sit. Pick 1 goes to the worst roster.
+          <span id="weeks-note"></span>
+        </p>
+      </div>
+      <div class="card">
+        <table class="tbl">
+          <thead>
+            <tr>
+              <th style="width:54px">Pick</th>
+              <th>Team</th>
+              <th class="right hide-sm">Record</th>
+              <th class="right">Best Possible</th>
+              <th class="right hide-sm">Actual</th>
+              <th class="right hide-sm">Efficiency</th>
+            </tr>
+          </thead>
+          <tbody id="tank-body">
+            <tr><td colspan="6" class="loading">Loading standings…</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <div class="legend">
+        <span>Click any team for their week-by-week optimal lineups.</span>
+      </div>
+    </section>
+  </div>
+
+  <!-- ================= LEAGUE RECORDS ================= -->
+  <div class="panel" id="panel-records" role="tabpanel" aria-labelledby="tab-records" hidden>
+
+    <section>
+      <div class="sec-head">
+        <h2>🏆 Championships</h2>
+        <p class="note">All-time titles, most to least.</p>
+      </div>
+      <div class="card">
+        <table class="tbl">
+          <thead>
+            <tr>
+              <th style="width:54px">#</th>
+              <th>Manager</th>
+              <th class="right">Titles</th>
+              <th class="right hide-sm">Won</th>
+              <th class="right hide-sm">Runner-up</th>
+            </tr>
+          </thead>
+          <tbody id="champ-body"><tr><td colspan="5" class="loading">Loading…</td></tr></tbody>
+        </table>
+      </div>
+    </section>
+
+    <section>
+      <div class="sec-head">
+        <h2>🔥 Top 10 Weekly Scores</h2>
+        <p class="note" id="score-note"></p>
+      </div>
+      <div class="card">
+        <table class="tbl">
+          <thead>
+            <tr>
+              <th style="width:54px">#</th>
+              <th>Manager</th>
+              <th class="right hide-sm">Season</th>
+              <th class="right hide-sm">Week</th>
+              <th class="right">Points</th>
+            </tr>
+          </thead>
+          <tbody id="top-body"><tr><td colspan="5" class="loading">Loading…</td></tr></tbody>
+        </table>
+      </div>
+    </section>
+
+    <section>
+      <div class="sec-head">
+        <h2>🧊 Bottom 10 Weekly Scores</h2>
+        <p class="note">Same rules, other end of the ladder.</p>
+      </div>
+      <div class="card">
+        <table class="tbl">
+          <thead>
+            <tr>
+              <th style="width:54px">#</th>
+              <th>Manager</th>
+              <th class="right hide-sm">Season</th>
+              <th class="right hide-sm">Week</th>
+              <th class="right">Points</th>
+            </tr>
+          </thead>
+          <tbody id="low-body"><tr><td colspan="5" class="loading">Loading…</td></tr></tbody>
+        </table>
+      </div>
+    </section>
+
+    <section>
+      <div class="sec-head">
+        <h2>💎 Best Waiver Wire Pickups</h2>
+        <p class="note" id="pickup-note"></p>
+      </div>
+      <div class="chips" id="pos-chips" role="tablist"></div>
+      <div class="card">
+        <table class="tbl">
+          <thead>
+            <tr>
+              <th style="width:54px">#</th>
+              <th>Player</th>
+              <th>Picked up by</th>
+              <th class="right hide-sm">Added</th>
+              <th class="right">Points</th>
+            </tr>
+          </thead>
+          <tbody id="pickup-body"><tr><td colspan="5" class="loading">Loading…</td></tr></tbody>
+        </table>
+      </div>
+      <div class="legend">
+        <span>Click any pickup for the week-by-week log.</span>
+      </div>
+    </section>
+
+  </div>
+
+  <footer>
+    <span>Data from the <a href="https://docs.sleeper.com/" target="_blank" rel="noopener">Sleeper API</a>.</span>
+    <span id="footer-updated"></span>
+  </footer>
+
+</div>
+
+<dialog id="modal">
+  <div class="modal-head">
+    <div>
+      <h3 id="modal-title">—</h3>
+      <p id="modal-sub"></p>
+    </div>
+    <button class="close" id="modal-close" aria-label="Close">×</button>
+  </div>
+  <div class="modal-body" id="modal-body"></div>
+</dialog>
+
+<script src="assets/app.js" type="module"></script>
+</body>
+</html>

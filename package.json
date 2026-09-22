@@ -1,0 +1,12 @@
+{
+  "name": "beatboys-dashboard",
+  "private": true,
+  "version": "1.0.0",
+  "type": "module",
+  "description": "Data dashboard for the Beat Boys Dynasty Sleeper league",
+  "scripts": {
+    "build:data": "node scripts/build-data.mjs",
+    "dev": "node scripts/serve.mjs"
+  },
+  "engines": { "node": ">=18" }
+}
