@@ -340,35 +340,27 @@ function renderScoreBoard(body, rows, tone) {
 }
 
 function renderPickups(records) {
-  const boards = { value: records.pickupsByValue, points: records.pickupsByPoints };
-  const positions = Object.keys(boards.points);
+  const boards = records.pickupsByPosition;
+  const positions = Object.keys(boards);
   const posChips = $("pos-chips");
-  const modeChips = $("mode-chips");
-  let mode = records.ktcAvailable ? "value" : "points";
   let position = positions[0];
 
-  if (!records.ktcAvailable) modeChips.hidden = true;
+  $("pickup-note").textContent = records.notes.pickups;
+  $("th-value").className = records.ktcAvailable ? "right accent" : "right";
 
   const draw = () => {
-    [...modeChips.children].forEach((c) => c.setAttribute("aria-selected", String(c.dataset.mode === mode)));
     [...posChips.children].forEach((c) => c.setAttribute("aria-selected", String(c.dataset.pos === position)));
-
-    // The active ranking gets the bright column header.
-    $("th-value").className = mode === "value" ? "right accent" : "right";
-    $("th-points").className = mode === "points" ? "right accent" : "right";
-    $("pickup-note").textContent =
-      mode === "value" ? records.notes.pickupsValue : records.notes.pickupsPoints;
 
     const body = $("pickup-body");
     body.replaceChildren();
-    const rows = boards[mode][position] || [];
+    const rows = boards[position] || [];
     if (!rows.length) {
       body.append(el("tr", {}, el("td", { colSpan: 6, className: "empty" }, `No ${position} pickups yet.`)));
       return;
     }
 
     rows.forEach((p, i) => {
-      const { display } = teamOf(p.userId);
+      const finder = teamOf(p.userId);
       const badge =
         p.type === "waiver"
           ? el("span", { className: "tag waiver" }, p.bid != null ? `$${p.bid}` : "Waiver")
@@ -378,12 +370,14 @@ function renderPickups(records) {
         ? el(
             "div",
             {},
-            el("span", { className: mode === "value" ? "big accent" : "dim" }, p.ktcValue.toLocaleString()),
+            el("span", { className: "big accent" }, p.ktcValue.toLocaleString()),
             el("small", { className: "faint", style: "display:block;font-size:11px" }, `${p.position}${p.ktcPosRank}`)
           )
         : el("span", { className: "faint" }, "—");
 
-      const gone = mode === "points" && !p.stillRostered;
+      // The pickup is credited to whoever found them; note where they ended up.
+      const owner = p.tradedAway ? teamOf(p.currentOwner).display : null;
+
       const row = el(
         "tr",
         { className: "row-btn", tabIndex: 0, role: "button", "aria-label": `${p.name} pickup detail` },
@@ -398,17 +392,26 @@ function renderPickups(records) {
             " ",
             p.name,
             el("small", {
-              textContent: `${p.nflTeam || "FA"} · ${p.weeksOwned} wk${p.weeksOwned === 1 ? "" : "s"} rostered${gone ? " · since moved on" : ""}`,
+              textContent: `${p.nflTeam || "FA"} · ${p.weeksOwned} wk${p.weeksOwned === 1 ? "" : "s"} rostered`,
             })
           )
         ),
-        el("td", {}, el("div", { className: "team" }, display, el("small", { textContent: `${p.season} · wk ${p.addedWeek}` }))),
+        el(
+          "td",
+          {},
+          el(
+            "div",
+            { className: "team" },
+            finder.display,
+            el("small", { textContent: owner ? `${p.season} · wk ${p.addedWeek} · traded to ${owner}` : `${p.season} · wk ${p.addedWeek}` })
+          )
+        ),
         el("td", { className: "right hide-sm" }, badge),
         el("td", { className: "num" }, valueCell),
-        el("td", { className: `num ${mode === "points" ? "big accent" : "dim"}` }, fmt1(p.points))
+        el("td", { className: "num dim" }, fmt1(p.points))
       );
 
-      const open = () => openPickupModal(p, display);
+      const open = () => openPickupModal(p, finder.display);
       row.addEventListener("click", open);
       row.addEventListener("keydown", (e) => {
         if (e.key === "Enter" || e.key === " ") { e.preventDefault(); open(); }
@@ -424,10 +427,6 @@ function renderPickups(records) {
     c.addEventListener("click", () => { position = pos; draw(); });
     posChips.append(c);
   });
-
-  [...modeChips.children].forEach((c) =>
-    c.addEventListener("click", () => { mode = c.dataset.mode; draw(); })
-  );
 
   draw();
 }
@@ -532,12 +531,13 @@ function openPickupModal(p, display) {
   );
 
   const how = p.type === "waiver" ? `Waiver claim${p.bid != null ? ` · $${p.bid} FAAB` : ""}` : "Free agent add";
+  const nowWith = p.tradedAway ? ` · since traded to ${teamOf(p.currentOwner).display}` : "";
 
   showModal(
     p.name,
     `${p.position} · ${p.nflTeam || "FA"} — added by ${display} in week ${p.addedWeek}, ${p.season}`,
     [
-      el("div", { className: "wk-meta", style: "padding:10px 0 2px" }, `${how} · ${p.weeksOwned} weeks rostered · started ${p.startedWeeks}`),
+      el("div", { className: "wk-meta", style: "padding:10px 0 2px" }, `${how} · ${p.weeksOwned} weeks rostered · started ${p.startedWeeks}${nowWith}`),
       p.ktcValue
         ? el(
             "div",

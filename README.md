@@ -20,22 +20,21 @@ Regular-season weeks only.
 - **Top 10 / Bottom 10 weekly scores** — click any row for that week's starting lineup.
   Kicker and defense points are **excluded from every total**, since those roster spots
   were cut for 2026. The modal shows what was dropped and Sleeper's official number.
-- **Best waiver wire pickups** — top 10 per position (QB/RB/WR/TE), with two rankings:
-  - *Dynasty value* (default) — players on a roster **right now** that their manager
-    originally got off the waiver wire, ranked by current
-    [KeepTradeCut](https://keeptradecut.com/dynasty-rankings) value for a **superflex,
-    TE-premium+** league (`superflexValues.tepp`). Anyone since dropped or traded away is
-    excluded: that value belongs to whoever holds them now. Points alone ranked streaming
-    QBs above genuine dynasty assets, which is what this fixes.
-  - *Points scored* — every claim and free-agent add in league history by the points the
-    player put up while rostered, starter or bench. Dropped and traded players still
-    count; the production was real.
+- **Best waiver wire pickups** — top 10 per position (QB/RB/WR/TE), ranked by current
+  [KeepTradeCut](https://keeptradecut.com/dynasty-rankings) value for a **superflex,
+  TE-premium+** league (`superflexValues.tepp`), matching this league's SUPER_FLEX slot
+  and 0.5 TE reception bonus. Points alone ranked streaming QBs above real dynasty
+  assets, which is what value-ranking fixes.
 
-  Both cover waiver claims (with FAAB bid) and in-season free-agent adds, and both carry
-  tenure across seasons — this is a dynasty league, so a claim that keeps paying next year
-  is the whole point. Repeat pickups of the same player are separate stints. A trade is
-  never a pickup, so a player waivered once and later traded back isn't credited to the
-  old claim.
+  The rules:
+  - Only players **still on a roster** count.
+  - Credit goes to whoever **made the pickup**, even if the player has since been traded
+    on — the find was theirs. The row notes where the player ended up.
+  - A player picked up more than once counts only for the **most recent** pickup, so each
+    player appears exactly once.
+  - Covers waiver claims (with FAAB bid) and in-season free-agent adds.
+  - Points shown are what the player scored for the manager who claimed them, starter or
+    bench, carried across seasons and ending if they were traded away.
 
 ## How it works
 
@@ -56,10 +55,12 @@ weeks score live. If that fetch fails it silently keeps the built-in data.
 GitHub Actions rebuilds and redeploys every 3 hours (`.github/workflows/deploy.yml`).
 `data/` is generated in CI and is not committed.
 
-KTC values are scraped from the JSON payload embedded in the dynasty-rankings page (one
-request per build). The board caps at 500 players with a value floor around 460, so a
-player who isn't found is shown as unranked rather than treated as an error. If KTC is
-unreachable the build still succeeds and the pickup board falls back to points ranking.
+KTC values are scraped from the JSON payload embedded in the dynasty-rankings page, **at
+most once a day**: the scrape is cached under `.cache/`, and the workflow restores that
+cache between runs keyed on the UTC date, so the 3-hourly Sleeper rebuild doesn't re-hit
+KTC. The board caps at 500 players with a value floor around 460, so a player who isn't
+found is shown as unranked rather than treated as an error. If KTC is unreachable the
+build reuses the last scrape, and failing that still succeeds with points ranking.
 
 ### Reading tenure from snapshots, not the transaction log
 
@@ -67,7 +68,10 @@ Weeks rostered come from the weekly matchup snapshots, not from replaying transa
 A waiver claim can process *after* a week's snapshot is taken — Malik Willis was claimed
 in 2025 week 16 but first appears in week 17 — so anchoring a stint to the transaction
 week silently dropped those pickups entirely. Runs are built from the snapshots and then
-matched back to whichever acquisition brought the player in.
+matched back to whichever acquisition brought the player in, on the run's *end* rather
+than its start: a same-week drop-and-re-add leaves tenure unbroken (Chris Rodriguez was
+re-claimed in 2025 week 7 while already rostered since week 3), so a pickup doesn't
+always open a run.
 
 ### Optimal lineup math
 

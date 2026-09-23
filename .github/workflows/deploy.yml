@@ -28,6 +28,19 @@ jobs:
         with:
           node-version: 22
 
+      # KTC is scraped at most once a day. The cache key is the UTC date, so the
+      # first build of the day fetches and every later build restores that copy;
+      # the restore-key falls back to the previous day so a KTC outage still has
+      # something to serve.
+      - id: ktc-date
+        run: echo "day=$(date -u +%F)" >> "$GITHUB_OUTPUT"
+
+      - uses: actions/cache@v4
+        with:
+          path: .cache
+          key: ktc-${{ steps.ktc-date.outputs.day }}
+          restore-keys: ktc-
+
       - name: Build data bundle from Sleeper
         env:
           SLEEPER_LEAGUE_ID: ${{ vars.SLEEPER_LEAGUE_ID || '1312156446493794305' }}

@@ -6,7 +6,7 @@
  * data/*.json. Run locally with `npm run build:data`, or on a schedule via
  * .github/workflows/build-data.yml.
  */
-import { writeFile, mkdir } from "node:fs/promises";
+import { writeFile, readFile, mkdir } from "node:fs/promises";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -30,6 +30,15 @@ const PICKUP_POSITIONS = ["QB", "RB", "WR", "TE"];
  * i.e. dynasty-irrelevant — so a miss is treated as unranked, not as an error.
  */
 const KTC_URL = "https://keeptradecut.com/dynasty-rankings";
+
+/**
+ * KTC is scraped at most once a day. The scrape is cached on disk and the
+ * cache is restored between CI runs (see .github/workflows/deploy.yml), so the
+ * 3-hourly Sleeper rebuild doesn't re-hit KTC. Dynasty values barely move
+ * inside a day anyway.
+ */
+const KTC_CACHE = resolve(ROOT, ".cache", "ktc.json");
+const KTC_MAX_AGE_MS = 24 * 60 * 60 * 1000;
 
 // --------------------------------------------------------------------------
 // fetch helpers
@@ -140,6 +149,13 @@ function nameKey(name) {
  * pickup board to points-ranked, not fail the whole build.
  */
 async function fetchKTC() {
+  const cached = await readKTCCache();
+  if (cached && Date.now() - cached.fetchedAt < KTC_MAX_AGE_MS) {
+    const age = Math.round((Date.now() - cached.fetchedAt) / 3.6e6);
+    console.log(`  KTC: ${cached.players.length} valuations from cache (${age}h old)`);
+    return indexKTC(cached.players);
+  }
+
   try {
     const res = await fetch(KTC_URL, {
       headers: { "User-Agent": "Mozilla/5.0 (compatible; beatboys-dashboard/1.0)" },
@@ -149,29 +165,51 @@ async function fetchKTC() {
     const match = html.match(/<script[^>]*id=["']ktc-players["'][^>]*>([\s\S]*?)<\/script>/);
     if (!match) throw new Error("ktc-players payload not found");
 
-    const map = new Map();
-    for (const p of JSON.parse(match[1])) {
-      if (!PICKUP_POSITIONS.includes(p.position)) continue;
-      const v = p.superflexValues?.tepp;
-      if (!v) continue;
-      const key = `${nameKey(p.playerName)}|${p.position}`;
-      // The board is value-sorted, so the first hit on a duplicate name wins.
-      if (!map.has(key)) {
-        map.set(key, {
-          value: v.value,
-          rank: v.rank,
-          positionalRank: v.positionalRank,
-          trend: p.superflexValues.overall7DayTrend ?? null,
-          age: p.age ?? null,
-        });
-      }
-    }
-    console.log(`  KTC: ${map.size} valuations (superflex, TEP+)`);
-    return map;
+    const players = JSON.parse(match[1])
+      .filter((p) => PICKUP_POSITIONS.includes(p.position) && p.superflexValues?.tepp)
+      .map((p) => ({
+        name: p.playerName,
+        position: p.position,
+        value: p.superflexValues.tepp.value,
+        rank: p.superflexValues.tepp.rank,
+        positionalRank: p.superflexValues.tepp.positionalRank,
+        trend: p.superflexValues.overall7DayTrend ?? null,
+        age: p.age ?? null,
+      }));
+
+    await mkdir(dirname(KTC_CACHE), { recursive: true });
+    await writeFile(KTC_CACHE, JSON.stringify({ fetchedAt: Date.now(), players }));
+    console.log(`  KTC: ${players.length} valuations fetched (superflex, TEP+)`);
+    return indexKTC(players);
   } catch (err) {
+    // A stale scrape still beats dropping the board to points-only.
+    if (cached) {
+      const age = Math.round((Date.now() - cached.fetchedAt) / 3.6e6);
+      console.warn(`  ! KTC fetch failed (${err.message}) — reusing ${age}h-old cache`);
+      return indexKTC(cached.players);
+    }
     console.warn(`  ! KTC unavailable (${err.message}) — pickups will rank on points`);
     return new Map();
   }
+}
+
+async function readKTCCache() {
+  try {
+    const cached = JSON.parse(await readFile(KTC_CACHE, "utf8"));
+    return Array.isArray(cached.players) && cached.players.length ? cached : null;
+  } catch {
+    return null;
+  }
+}
+
+/** Index by name + position; the board is value-sorted, so first hit wins. */
+function indexKTC(players) {
+  const map = new Map();
+  for (const p of players) {
+    const key = `${nameKey(p.name)}|${p.position}`;
+    if (!map.has(key)) map.set(key, p);
+  }
+  return map;
 }
 
 // --------------------------------------------------------------------------
@@ -466,80 +504,13 @@ async function main() {
     return best;
   }
 
-  // The board answers "which players on my roster right now did I get off the
-  // waiver wire, and what are they worth?" — so it is driven by the live
-  // rosters rather than by every historical stint. That also means a player
-  // can only appear once (one manager rosters them), and someone who dropped
-  // a player doesn't get credit for value that accrued to whoever holds him.
-  const currentRoster = new Map(); // userId -> Set(playerId)
-  for (const r of current.rosters) {
-    const userId = current.ownerOf.get(r.roster_id);
-    if (userId) currentRoster.set(userId, new Set(r.players || []));
-  }
-
-  /** The unbroken stretch of weeks ending at the present, if there is one. */
-  function currentRun(userId, playerId) {
-    const indices = presence.get(`${userId}|${playerId}`);
-    if (!indices?.length) return [];
-    const lastIdx = timeline.length - 1;
-    if (indices[indices.length - 1] !== lastIdx) return [];
-    const run = [];
-    for (let i = indices.length - 1, expect = lastIdx; i >= 0 && indices[i] === expect; i--, expect--) {
-      run.unshift(indices[i]);
-    }
-    return run;
-  }
-
-  const currentPickups = [];
-  for (const [userId, roster] of currentRoster) {
-    for (const playerId of roster) {
-      const position = posOf(playerId);
-      if (!position || !PICKUP_POSITIONS.includes(position)) continue;
-
-      // How this manager most recently came to own the player. Drafted players
-      // have no acquisition; a trade isn't a waiver pickup.
-      let acq = null;
-      for (const a of acquisitions) {
-        if (a.userId !== userId || a.playerId !== playerId) continue;
-        if (!acq || a.created > acq.created) acq = a;
-      }
-      if (!acq || (acq.type !== "waiver" && acq.type !== "free_agent")) continue;
-
-      const run = currentRun(userId, playerId);
-      const log = run.map((idx) => {
-        const slot = timeline[idx];
-        const e = slot.byUser.get(userId);
-        return {
-          season: slot.season,
-          week: slot.week,
-          points: round2(e.players_points?.[playerId] ?? 0),
-          started: (e.starters || []).includes(playerId),
-        };
-      });
-
-      currentPickups.push({
-        season: acq.season,
-        playerId,
-        name: nameOf(playerId),
-        position,
-        nflTeam: players[playerId]?.[2] || null,
-        userId,
-        addedWeek: acq.week,
-        spansSeasons: log.length > 0 && log[log.length - 1].season !== acq.season,
-        type: acq.type,
-        bid: acq.type === "waiver" ? acq.bid : null,
-        ...valueOf(playerId, position),
-        points: round2(log.reduce((sum, w) => sum + w.points, 0)),
-        weeksOwned: log.length,
-        startedWeeks: log.filter((w) => w.started).length,
-        pointsStarted: round2(log.filter((w) => w.started).reduce((sum, w) => sum + w.points, 0)),
-        log,
-      });
-    }
-  }
-
+  // The board answers "which players on a roster right now came off the waiver
+  // wire, and who found them?" Credit goes to the manager who made the pickup,
+  // even if the player has since been traded on — the find was theirs. A player
+  // picked up more than once counts only for the most recent pickup, so each
+  // player appears exactly once.
   /** Current dynasty worth — not worth at the time of the claim. */
-  function valueOf(playerId, position) {
+  function ktcFor(playerId, position) {
     const v = ktc.get(`${nameKey(nameOf(playerId))}|${position}`) || null;
     return {
       ktcValue: v?.value ?? null,
@@ -550,13 +521,32 @@ async function main() {
     };
   }
 
-  // Every historical stint, for the all-time production board. A player who
-  // was later dropped or traded still counts here — the points were real.
-  const pastPickups = [];
-  for (const [key, indices] of presence) {
-    const [userId, playerId] = key.split("|");
-    const position = posOf(playerId);
-    if (!position || !PICKUP_POSITIONS.includes(position)) continue;
+  const rosteredNow = new Map(); // playerId -> userId currently holding them
+  for (const r of current.rosters) {
+    const userId = current.ownerOf.get(r.roster_id);
+    if (!userId) continue;
+    for (const playerId of r.players || []) rosteredNow.set(playerId, userId);
+  }
+
+  /**
+   * The unbroken stretch on this manager's roster that the pickup belongs to.
+   *
+   * Matched on the run's *end*, not its start, because a pickup doesn't always
+   * open a run: a same-week drop-and-re-add leaves tenure unbroken (Chris
+   * Rodriguez was re-claimed in 2025 week 7 while already rostered since week
+   * 3), and a claim that processes after the week's snapshot starts the run a
+   * week late. Either way the whole stretch is theirs.
+   */
+  function runFor(userId, playerId, acq) {
+    const indices = presence.get(`${userId}|${playerId}`);
+    if (!indices?.length) return [];
+
+    const from = timeline.findIndex(
+      (slot) =>
+        slot.seasonIndex > acq.seasonIndex ||
+        (slot.seasonIndex === acq.seasonIndex && slot.week >= acq.week)
+    );
+    if (from === -1) return []; // picked up after the last scored week
 
     const runs = [];
     for (const idx of indices) {
@@ -564,52 +554,58 @@ async function main() {
       if (last && idx === last[last.length - 1] + 1) last.push(idx);
       else runs.push([idx]);
     }
+    return runs.find((run) => run[run.length - 1] >= from) || [];
+  }
 
-    for (const run of runs) {
-      const startSlot = timeline[run[0]];
-      let acq = null;
-      for (const a of acquisitions) {
-        if (a.userId !== userId || a.playerId !== playerId) continue;
-        if (a.seasonIndex > startSlot.seasonIndex) continue;
-        if (a.seasonIndex === startSlot.seasonIndex && a.week > startSlot.week) continue;
-        if (!acq || a.created > acq.created) acq = a;
-      }
-      if (!acq || (acq.type !== "waiver" && acq.type !== "free_agent")) continue;
+  const pickups = [];
+  for (const [playerId, currentOwner] of rosteredNow) {
+    const position = posOf(playerId);
+    if (!position || !PICKUP_POSITIONS.includes(position)) continue;
 
-      const log = run.map((idx) => {
-        const slot = timeline[idx];
-        const e = slot.byUser.get(userId);
-        return {
-          season: slot.season,
-          week: slot.week,
-          points: round2(e.players_points?.[playerId] ?? 0),
-          started: (e.starters || []).includes(playerId),
-        };
-      });
-      const endSlot = timeline[run[run.length - 1]];
-
-      pastPickups.push({
-        season: acq.season,
-        playerId,
-        name: nameOf(playerId),
-        position,
-        nflTeam: players[playerId]?.[2] || null,
-        userId,
-        addedWeek: acq.week,
-        throughSeason: endSlot.season,
-        throughWeek: endSlot.week,
-        spansSeasons: endSlot.season !== acq.season,
-        stillRostered: currentRoster.get(userId)?.has(playerId) === true,
-        type: acq.type,
-        bid: acq.type === "waiver" ? acq.bid : null,
-        ...valueOf(playerId, position),
-        points: round2(log.reduce((sum, w) => sum + w.points, 0)),
-        weeksOwned: log.length,
-        startedWeeks: log.filter((w) => w.started).length,
-        pointsStarted: round2(log.filter((w) => w.started).reduce((sum, w) => sum + w.points, 0)),
-        log,
-      });
+    // The most recent time anyone claimed this player off the wire. Drafted
+    // players have none; trades don't count as a pickup.
+    let acq = null;
+    for (const a of acquisitions) {
+      if (a.playerId !== playerId) continue;
+      if (a.type !== "waiver" && a.type !== "free_agent") continue;
+      if (!acq || a.created > acq.created) acq = a;
     }
+    if (!acq) continue;
+
+    // Points are what the player scored for the manager who picked them up —
+    // a trade ends that stretch, and the acquiring team's points aren't theirs.
+    const run = runFor(acq.userId, playerId, acq);
+    const log = run.map((idx) => {
+      const slot = timeline[idx];
+      const e = slot.byUser.get(acq.userId);
+      return {
+        season: slot.season,
+        week: slot.week,
+        points: round2(e.players_points?.[playerId] ?? 0),
+        started: (e.starters || []).includes(playerId),
+      };
+    });
+
+    pickups.push({
+      season: acq.season,
+      playerId,
+      name: nameOf(playerId),
+      position,
+      nflTeam: players[playerId]?.[2] || null,
+      userId: acq.userId,
+      currentOwner,
+      tradedAway: currentOwner !== acq.userId,
+      addedWeek: acq.week,
+      spansSeasons: log.length > 0 && log[log.length - 1].season !== acq.season,
+      type: acq.type,
+      bid: acq.type === "waiver" ? acq.bid : null,
+      ...ktcFor(playerId, position),
+      points: round2(log.reduce((sum, w) => sum + w.points, 0)),
+      weeksOwned: log.length,
+      startedWeeks: log.filter((w) => w.started).length,
+      pointsStarted: round2(log.filter((w) => w.started).reduce((sum, w) => sum + w.points, 0)),
+      log,
+    });
   }
 
   // Rank on current dynasty value; fall back to points when KTC is unavailable
@@ -618,16 +614,11 @@ async function main() {
   const rankByValue = (a, b) => (b.ktcValue ?? -1) - (a.ktcValue ?? -1) || b.points - a.points;
   const rankByPoints = (a, b) => b.points - a.points;
 
-  const pickupsByValue = {};
-  const pickupsByPoints = {};
+  const pickupsByPosition = {};
   for (const pos of PICKUP_POSITIONS) {
-    pickupsByValue[pos] = currentPickups
+    pickupsByPosition[pos] = pickups
       .filter((p) => p.position === pos)
       .sort(ktcAvailable ? rankByValue : rankByPoints)
-      .slice(0, 10);
-    pickupsByPoints[pos] = pastPickups
-      .filter((p) => p.position === pos)
-      .sort(rankByPoints)
       .slice(0, 10);
   }
 
@@ -659,17 +650,14 @@ async function main() {
     championshipsBySeason: championships,
     topScores,
     lowScores,
-    pickupsByValue,
-    pickupsByPoints,
+    pickupsByPosition,
     ktcAvailable,
     ktcCount: ktc.size,
     notes: {
       scores:
         "Regular-season weeks only. Kicker and defense points are removed from every total because those roster spots were cut for 2026.",
-      pickupsValue:
-        "Players on a roster right now that their manager originally got off the waiver wire, ranked by current KeepTradeCut dynasty value for a superflex, TE-premium+ league. Anyone since dropped or traded away is excluded — that value belongs to whoever holds them now.",
-      pickupsPoints:
-        "Every waiver claim and in-season free-agent add in league history, ranked by the points the player scored while on that roster — starter or bench, carried across seasons. Dropped and traded players still count; the production was real.",
+      pickups:
+        "Every player still on a roster who was originally picked up off the waiver wire, ranked by current KeepTradeCut dynasty value for a superflex, TE-premium+ league. Credit goes to whoever made the pickup, even if the player has since been traded on. Players picked up more than once count only for the most recent pickup. Points are what they scored for the manager who claimed them.",
     },
     updatedAt: league.updatedAt,
   };
@@ -682,8 +670,7 @@ async function main() {
   ]);
 
   console.log(
-    `\nWrote ${Object.keys(players).length} players, ${weeklyScores.length} weekly scores, ` +
-      `${currentPickups.length} rostered pickups, ${pastPickups.length} historical stints.`
+    `\nWrote ${Object.keys(players).length} players, ${weeklyScores.length} weekly scores, ${pickups.length} pickups.`
   );
 }
 

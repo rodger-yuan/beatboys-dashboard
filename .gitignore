@@ -3,3 +3,6 @@ node_modules/
 
 # Rebuilt from the Sleeper API by scripts/build-data.mjs (and in CI on every deploy).
 data/
+
+# KTC scrape cache (restored between CI runs; refreshed at most once a day).
+.cache/
