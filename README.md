@@ -20,10 +20,22 @@ Regular-season weeks only.
 - **Top 10 / Bottom 10 weekly scores** — click any row for that week's starting lineup.
   Kicker and defense points are **excluded from every total**, since those roster spots
   were cut for 2026. The modal shows what was dropped and Sleeper's official number.
-- **Best waiver wire pickups** — split into top 10 per position (QB/RB/WR/TE). A pickup's
-  value is every point the player scored while on that roster, starting or benched.
-  Covers both waiver claims (with FAAB bid) and in-season free-agent adds. Repeat
-  pickups of the same player count as separate stints.
+- **Best waiver wire pickups** — top 10 per position (QB/RB/WR/TE), with two rankings:
+  - *Dynasty value* (default) — players on a roster **right now** that their manager
+    originally got off the waiver wire, ranked by current
+    [KeepTradeCut](https://keeptradecut.com/dynasty-rankings) value for a **superflex,
+    TE-premium+** league (`superflexValues.tepp`). Anyone since dropped or traded away is
+    excluded: that value belongs to whoever holds them now. Points alone ranked streaming
+    QBs above genuine dynasty assets, which is what this fixes.
+  - *Points scored* — every claim and free-agent add in league history by the points the
+    player put up while rostered, starter or bench. Dropped and traded players still
+    count; the production was real.
+
+  Both cover waiver claims (with FAAB bid) and in-season free-agent adds, and both carry
+  tenure across seasons — this is a dynasty league, so a claim that keeps paying next year
+  is the whole point. Repeat pickups of the same player are separate stints. A trade is
+  never a pickup, so a player waivered once and later traded back isn't credited to the
+  old claim.
 
 ## How it works
 
@@ -34,7 +46,7 @@ Regular-season weeks only.
 | --- | --- |
 | `league.json` | members, season list, last-updated stamp |
 | `tankathon.json` | per-team best-possible totals + weekly optimal lineups |
-| `records.json` | championships, score records, waiver pickups |
+| `records.json` | championships, score records, both waiver-pickup boards |
 | `players.json` | slim `id → [name, position, nflTeam]` map (~150 KB) |
 
 The page renders that bundle instantly, then re-pulls the current season's matchups
@@ -43,6 +55,19 @@ weeks score live. If that fetch fails it silently keeps the built-in data.
 
 GitHub Actions rebuilds and redeploys every 3 hours (`.github/workflows/deploy.yml`).
 `data/` is generated in CI and is not committed.
+
+KTC values are scraped from the JSON payload embedded in the dynasty-rankings page (one
+request per build). The board caps at 500 players with a value floor around 460, so a
+player who isn't found is shown as unranked rather than treated as an error. If KTC is
+unreachable the build still succeeds and the pickup board falls back to points ranking.
+
+### Reading tenure from snapshots, not the transaction log
+
+Weeks rostered come from the weekly matchup snapshots, not from replaying transactions.
+A waiver claim can process *after* a week's snapshot is taken — Malik Willis was claimed
+in 2025 week 16 but first appears in week 17 — so anchoring a stint to the transaction
+week silently dropped those pickups entirely. Runs are built from the snapshots and then
+matched back to whichever acquisition brought the player in.
 
 ### Optimal lineup math
 

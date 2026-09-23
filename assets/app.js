@@ -287,12 +287,11 @@ function weekGrid(team) {
 function renderRecords() {
   const { records } = DATA;
   $("score-note").textContent = records.notes.scores;
-  $("pickup-note").textContent = records.notes.pickups;
 
   renderChampionships(records.championships);
   renderScoreBoard($("top-body"), records.topScores, "hot");
   renderScoreBoard($("low-body"), records.lowScores, "cold");
-  renderPickups(records.pickupsByPosition);
+  renderPickups(records);
 }
 
 function renderChampionships(rows) {
@@ -340,26 +339,51 @@ function renderScoreBoard(body, rows, tone) {
   });
 }
 
-function renderPickups(byPos) {
-  const positions = Object.keys(byPos);
-  const chips = $("pos-chips");
-  chips.replaceChildren();
+function renderPickups(records) {
+  const boards = { value: records.pickupsByValue, points: records.pickupsByPoints };
+  const positions = Object.keys(boards.points);
+  const posChips = $("pos-chips");
+  const modeChips = $("mode-chips");
+  let mode = records.ktcAvailable ? "value" : "points";
+  let position = positions[0];
 
-  const show = (pos) => {
-    [...chips.children].forEach((c) => c.setAttribute("aria-selected", String(c.dataset.pos === pos)));
+  if (!records.ktcAvailable) modeChips.hidden = true;
+
+  const draw = () => {
+    [...modeChips.children].forEach((c) => c.setAttribute("aria-selected", String(c.dataset.mode === mode)));
+    [...posChips.children].forEach((c) => c.setAttribute("aria-selected", String(c.dataset.pos === position)));
+
+    // The active ranking gets the bright column header.
+    $("th-value").className = mode === "value" ? "right accent" : "right";
+    $("th-points").className = mode === "points" ? "right accent" : "right";
+    $("pickup-note").textContent =
+      mode === "value" ? records.notes.pickupsValue : records.notes.pickupsPoints;
+
     const body = $("pickup-body");
     body.replaceChildren();
-    const rows = byPos[pos] || [];
+    const rows = boards[mode][position] || [];
     if (!rows.length) {
-      body.append(el("tr", {}, el("td", { colSpan: 5, className: "empty" }, `No ${pos} pickups yet.`)));
+      body.append(el("tr", {}, el("td", { colSpan: 6, className: "empty" }, `No ${position} pickups yet.`)));
       return;
     }
+
     rows.forEach((p, i) => {
       const { display } = teamOf(p.userId);
       const badge =
         p.type === "waiver"
           ? el("span", { className: "tag waiver" }, p.bid != null ? `$${p.bid}` : "Waiver")
           : el("span", { className: "tag" }, "FA");
+
+      const valueCell = p.ktcValue
+        ? el(
+            "div",
+            {},
+            el("span", { className: mode === "value" ? "big accent" : "dim" }, p.ktcValue.toLocaleString()),
+            el("small", { className: "faint", style: "display:block;font-size:11px" }, `${p.position}${p.ktcPosRank}`)
+          )
+        : el("span", { className: "faint" }, "—");
+
+      const gone = mode === "points" && !p.stillRostered;
       const row = el(
         "tr",
         { className: "row-btn", tabIndex: 0, role: "button", "aria-label": `${p.name} pickup detail` },
@@ -373,13 +397,17 @@ function renderPickups(byPos) {
             el("span", { className: "pos", "data-p": p.position }, p.position),
             " ",
             p.name,
-            el("small", { textContent: `${p.nflTeam || "FA"} · ${p.weeksOwned} wk${p.weeksOwned === 1 ? "" : "s"} rostered` })
+            el("small", {
+              textContent: `${p.nflTeam || "FA"} · ${p.weeksOwned} wk${p.weeksOwned === 1 ? "" : "s"} rostered${gone ? " · since moved on" : ""}`,
+            })
           )
         ),
         el("td", {}, el("div", { className: "team" }, display, el("small", { textContent: `${p.season} · wk ${p.addedWeek}` }))),
         el("td", { className: "right hide-sm" }, badge),
-        el("td", { className: "num big accent" }, fmt1(p.points))
+        el("td", { className: "num" }, valueCell),
+        el("td", { className: `num ${mode === "points" ? "big accent" : "dim"}` }, fmt1(p.points))
       );
+
       const open = () => openPickupModal(p, display);
       row.addEventListener("click", open);
       row.addEventListener("keydown", (e) => {
@@ -389,13 +417,19 @@ function renderPickups(byPos) {
     });
   };
 
+  posChips.replaceChildren();
   positions.forEach((pos) => {
     const c = el("button", { className: "chip", type: "button", role: "tab" }, pos);
     c.dataset.pos = pos;
-    c.addEventListener("click", () => show(pos));
-    chips.append(c);
+    c.addEventListener("click", () => { position = pos; draw(); });
+    posChips.append(c);
   });
-  show(positions[0]);
+
+  [...modeChips.children].forEach((c) =>
+    c.addEventListener("click", () => { mode = c.dataset.mode; draw(); })
+  );
+
+  draw();
 }
 
 // ---------------------------------------------------------------------------
@@ -489,7 +523,7 @@ function openPickupModal(p, display) {
         el(
           "tr",
           { className: w.started ? "" : "benched" },
-          el("td", {}, el("span", { className: "slot" }, `WK${w.week}`)),
+          el("td", {}, el("span", { className: "slot" }, p.spansSeasons ? `${w.season.slice(2)}W${w.week}` : `WK${w.week}`)),
           el("td", {}, w.started ? "Started" : "Bench"),
           el("td", {}, fmt1(w.points))
         )
@@ -504,6 +538,13 @@ function openPickupModal(p, display) {
     `${p.position} · ${p.nflTeam || "FA"} — added by ${display} in week ${p.addedWeek}, ${p.season}`,
     [
       el("div", { className: "wk-meta", style: "padding:10px 0 2px" }, `${how} · ${p.weeksOwned} weeks rostered · started ${p.startedWeeks}`),
+      p.ktcValue
+        ? el(
+            "div",
+            { className: "wk-meta" },
+            `KTC ${p.ktcValue.toLocaleString()} — ${p.position}${p.ktcPosRank} in superflex TEP+${p.age ? `, age ${p.age}` : ""}`
+          )
+        : el("div", { className: "wk-meta" }, "Outside KTC's top 500 — no dynasty value on the board"),
       table,
       el(
         "div",
