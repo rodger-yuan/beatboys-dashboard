@@ -15,6 +15,12 @@ roster. Click a team to see the optimal lineup it left on the table each week.
 
 Regular-season weeks only.
 
+### Best Available
+The most valuable players **nobody in the league rosters**, top 10 per position, by
+KeepTradeCut dynasty value for a superflex, TE-premium+ league. The build ships KTC
+values keyed by Sleeper id, so the page re-checks availability against live rosters on
+every load rather than trusting the last build — free agents turn over daily.
+
 ### League Records
 - **Championships** — all-time titles per manager, most to least.
 - **Top 10 / Bottom 10 weekly scores** — click any row for that week's starting lineup.
@@ -47,6 +53,7 @@ Regular-season weeks only.
 | `tankathon.json` | per-team best-possible totals + weekly optimal lineups |
 | `records.json` | championships, score records, both waiver-pickup boards |
 | `players.json` | slim `id → [name, position, nflTeam]` map (~150 KB) |
+| `available.json` | unrostered players by value, plus KTC values keyed by Sleeper id |
 
 The page renders that bundle instantly, then re-pulls the current season's matchups
 directly from Sleeper in the browser and recomputes the Tank-a-thon, so in-progress

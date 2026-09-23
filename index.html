@@ -26,6 +26,7 @@
 
   <nav class="tabs" role="tablist">
     <button class="tab" role="tab" id="tab-tank" aria-controls="panel-tank" aria-selected="true">Tank-a-thon</button>
+    <button class="tab" role="tab" id="tab-available" aria-controls="panel-available" aria-selected="false">Best Available</button>
     <button class="tab" role="tab" id="tab-records" aria-controls="panel-records" aria-selected="false">League Records</button>
   </nav>
 
@@ -60,6 +61,37 @@
       </div>
       <div class="legend">
         <span>Click any team for their week-by-week optimal lineups.</span>
+      </div>
+    </section>
+  </div>
+
+  <!-- ================= BEST AVAILABLE ================= -->
+  <div class="panel" id="panel-available" role="tabpanel" aria-labelledby="tab-available" hidden>
+    <section>
+      <div class="sec-head">
+        <h2>🎯 Best Available</h2>
+        <p class="note">
+          The most valuable players <strong>nobody in the league rosters</strong>, by
+          KeepTradeCut dynasty value for a superflex, TE-premium+ league. Checked against
+          live rosters every time this page loads — free agents move fast.
+        </p>
+      </div>
+      <div class="chips" id="avail-chips" role="tablist"></div>
+      <div class="card">
+        <table class="tbl">
+          <thead>
+            <tr>
+              <th style="width:54px">#</th>
+              <th>Player</th>
+              <th class="right hide-sm">Age</th>
+              <th class="right">KTC value</th>
+            </tr>
+          </thead>
+          <tbody id="avail-body"><tr><td colspan="4" class="loading">Loading…</td></tr></tbody>
+        </table>
+      </div>
+      <div class="legend">
+        <span id="avail-stamp"></span>
       </div>
     </section>
   </div>

@@ -623,6 +623,47 @@ async function main() {
   }
 
   // ======================================================================
+  // Best available — valuable players nobody rosters
+  // ======================================================================
+  // Shipped with KTC values keyed by Sleeper id so the page can recompute
+  // availability against live rosters; free agents change daily, and a board
+  // that's three hours stale is a board that gets someone sniped.
+  const rosteredAll = new Set();
+  for (const r of current.rosters) for (const playerId of r.players || []) rosteredAll.add(playerId);
+
+  const ktcById = {};
+  for (const [playerId, [name, position, nflTeam]] of Object.entries(players)) {
+    if (!PICKUP_POSITIONS.includes(position) || !nflTeam) continue; // no NFL team = not addable
+    const v = ktc.get(`${nameKey(name)}|${position}`);
+    if (v) ktcById[playerId] = [v.value, v.positionalRank, v.age];
+  }
+
+  const availableByPosition = {};
+  for (const pos of PICKUP_POSITIONS) {
+    availableByPosition[pos] = Object.entries(ktcById)
+      .filter(([playerId]) => !rosteredAll.has(playerId) && players[playerId][1] === pos)
+      .map(([playerId, [value, positionalRank, age]]) => ({
+        playerId,
+        name: players[playerId][0],
+        position: pos,
+        nflTeam: players[playerId][2],
+        ktcValue: value,
+        ktcPosRank: positionalRank,
+        age,
+      }))
+      .sort((a, b) => b.ktcValue - a.ktcValue)
+      .slice(0, 10);
+  }
+
+  const available = {
+    season: current.season,
+    byPosition: availableByPosition,
+    values: ktcById,
+    ktcAvailable,
+    updatedAt: new Date().toISOString(),
+  };
+
+  // ======================================================================
   // write
   // ======================================================================
   await mkdir(OUT, { recursive: true });
@@ -667,10 +708,13 @@ async function main() {
     writeJson("tankathon.json", tankathon),
     writeJson("records.json", records),
     writeJson("players.json", players),
+    writeJson("available.json", available),
   ]);
 
   console.log(
-    `\nWrote ${Object.keys(players).length} players, ${weeklyScores.length} weekly scores, ${pickups.length} pickups.`
+    `\nWrote ${Object.keys(players).length} players, ${weeklyScores.length} weekly scores, ` +
+      `${pickups.length} pickups, ${Object.keys(ktcById).length} valued players ` +
+      `(${Object.values(availableByPosition).flat().length} shown as available).`
   );
 }
 

@@ -34,15 +34,15 @@ init();
 
 async function init() {
   try {
-    const [league, tank, records, players] = await Promise.all(
-      ["league", "tankathon", "records", "players"].map((f) =>
+    const [league, tank, records, players, available] = await Promise.all(
+      ["league", "tankathon", "records", "players", "available"].map((f) =>
         fetch(`data/${f}.json`, { cache: "no-cache" }).then((r) => {
           if (!r.ok) throw new Error(`data/${f}.json → ${r.status}`);
           return r.json();
         })
       )
     );
-    DATA = { league, tank, records, players };
+    DATA = { league, tank, records, players, available };
   } catch (err) {
     document.querySelectorAll(".loading").forEach((n) => {
       n.textContent = "Couldn't load league data. Try a refresh.";
@@ -56,6 +56,7 @@ async function init() {
   setupTabs();
   renderHeader();
   renderTank(DATA.tank);
+  renderAvailable(DATA.available.byPosition, DATA.available.updatedAt, false);
   renderRecords();
   setupModal();
 
@@ -104,7 +105,7 @@ function setupTabs() {
     });
   });
   const hash = location.hash.slice(1);
-  if (hash === "records") $("tab-records").click();
+  if (hash) $(`tab-${hash}`)?.click();
 }
 
 // ---------------------------------------------------------------------------
@@ -197,6 +198,50 @@ async function refreshLive() {
   } catch (err) {
     console.warn("Live refresh failed, keeping cached data.", err);
   }
+
+  refreshAvailable();
+}
+
+/**
+ * Recompute the best-available board against live rosters. The build ships KTC
+ * values keyed by Sleeper id, so only the roster list has to be fetched — free
+ * agents turn over daily and a three-hour-old list gets people sniped.
+ */
+async function refreshAvailable() {
+  const { available, players, league } = DATA;
+  if (!available?.values) return;
+  try {
+    const rosters = await fetch(`${API}/league/${league.leagueId}/rosters`).then((r) => {
+      if (!r.ok) throw new Error(`rosters → ${r.status}`);
+      return r.json();
+    });
+
+    const rostered = new Set();
+    for (const r of rosters) for (const playerId of r.players || []) rostered.add(playerId);
+
+    const byPosition = {};
+    for (const [playerId, [ktcValue, ktcPosRank, age]] of Object.entries(available.values)) {
+      if (rostered.has(playerId)) continue;
+      const p = players[playerId];
+      if (!p) continue;
+      (byPosition[p[1]] ||= []).push({
+        playerId,
+        name: p[0],
+        position: p[1],
+        nflTeam: p[2],
+        ktcValue,
+        ktcPosRank,
+        age,
+      });
+    }
+    for (const pos of Object.keys(byPosition)) {
+      byPosition[pos] = byPosition[pos].sort((a, b) => b.ktcValue - a.ktcValue).slice(0, 10);
+    }
+
+    renderAvailable(byPosition, new Date().toISOString(), true);
+  } catch (err) {
+    console.warn("Could not refresh free agents, showing the last build.", err);
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -278,6 +323,77 @@ function weekGrid(team) {
     { className: "detail-inner" },
     cards.length ? el("div", { className: "wk-grid" }, cards) : el("div", { className: "empty" }, "No weeks scored.")
   );
+}
+
+// ---------------------------------------------------------------------------
+// Best available
+// ---------------------------------------------------------------------------
+
+let availPosition = null;
+
+function renderAvailable(byPosition, updatedAt, live) {
+  const positions = ["QB", "RB", "WR", "TE"].filter((p) => byPosition[p]?.length);
+  if (!positions.length) return;
+  if (!availPosition || !positions.includes(availPosition)) availPosition = positions[0];
+
+  const chips = $("avail-chips");
+  const when = new Date(updatedAt).toLocaleString(undefined, {
+    month: "short", day: "numeric", hour: "numeric", minute: "2-digit",
+  });
+  $("avail-stamp").textContent = live
+    ? `Checked against live rosters at ${when}.`
+    : `From the last build at ${when}.`;
+
+  const draw = () => {
+    [...chips.children].forEach((c) => c.setAttribute("aria-selected", String(c.dataset.pos === availPosition)));
+
+    const body = $("avail-body");
+    body.replaceChildren();
+    const rows = byPosition[availPosition] || [];
+    if (!rows.length) {
+      body.append(el("tr", {}, el("td", { colSpan: 4, className: "empty" }, `Every valued ${availPosition} is rostered.`)));
+      return;
+    }
+
+    rows.forEach((p, i) =>
+      body.append(
+        el(
+          "tr",
+          {},
+          el("td", {}, el("span", { className: `pick${i === 0 ? " gold" : ""}` }, String(i + 1))),
+          el(
+            "td",
+            {},
+            el(
+              "div",
+              { className: "team" },
+              el("span", { className: "pos", "data-p": p.position }, p.position),
+              " ",
+              p.name,
+              el("small", { textContent: p.nflTeam || "FA" })
+            )
+          ),
+          el("td", { className: "num dim hide-sm" }, p.age ? String(p.age) : "—"),
+          el(
+            "td",
+            { className: "num" },
+            el("span", { className: "big accent" }, p.ktcValue.toLocaleString()),
+            el("small", { className: "faint", style: "display:block;font-size:11px" }, `${p.position}${p.ktcPosRank}`)
+          )
+        )
+      )
+    );
+  };
+
+  chips.replaceChildren();
+  positions.forEach((pos) => {
+    const c = el("button", { className: "chip", type: "button", role: "tab" }, pos);
+    c.dataset.pos = pos;
+    c.addEventListener("click", () => { availPosition = pos; draw(); });
+    chips.append(c);
+  });
+
+  draw();
 }
 
 // ---------------------------------------------------------------------------
