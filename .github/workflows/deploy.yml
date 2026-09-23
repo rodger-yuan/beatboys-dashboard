@@ -26,7 +26,7 @@ jobs:
 
       - uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version: 22
 
       - name: Build data bundle from Sleeper
         env:
@@ -38,11 +38,9 @@ jobs:
           mkdir -p _site
           cp -r index.html assets data .nojekyll _site/
 
+      # Pages must already be enabled with "GitHub Actions" as the source
+      # (Settings -> Pages). GITHUB_TOKEN isn't allowed to turn it on itself.
       - uses: actions/configure-pages@v5
-        with:
-          # Turns Pages on and points it at Actions, so there's no manual
-          # repo-settings step after the first push.
-          enablement: true
 
       - uses: actions/upload-pages-artifact@v3
         with:
